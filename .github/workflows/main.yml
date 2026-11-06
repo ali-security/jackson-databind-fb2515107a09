@@ -1,32 +1,21 @@
 name: Build and Deploy Snapshot
 on:
-  push:
-    branches:
-    - master
-    - "3.0"
-    - "2.14"
-    - "2.13"
-    paths-ignore:
-    - "README.md"
-    - "release-notes/*"
-  pull_request:
-    branches:
-    - master
-    - "3.0"
-    - "2.14"
-    - "2.13"
-    paths-ignore:
-    - "README.md"
-    - "release-notes/*"
+  workflow_dispatch:
+    inputs:
+      test-filter:
+        description: "Space-separated test class selector (empty = full suite)"
+        required: false
+        default: ""
 jobs:
   build:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         # JDK 17 has a few failures so cannot yet enable for this module
         java_version: ['8', '11']
-        os: ['ubuntu-20.04']
+        os: ['ubuntu-latest']
     env:
       JAVA_OPTS: "-XX:+TieredCompilation -XX:TieredStopAtLevel=1"
     steps:
@@ -44,12 +33,43 @@ jobs:
         # gpg-private-key: ${{ secrets.MAVEN_GPG_PRIVATE_KEY }} # Value of the GPG private key to import
         # gpg-passphrase: MAVEN_GPG_PASSPHRASE # env variable for GPG private key passphrase
     - name: Build
-      run: ./mvnw -B -q -ff -ntp verify
+      env:
+        FILTER: ${{ inputs.test-filter }}
+      run: |
+        if [ -n "$FILTER" ]; then
+          ./mvnw -B -q -ff -ntp verify -Dtest="${FILTER// /,}" -Dsurefire.failIfNoSpecifiedTests=false
+        else
+          ./mvnw -B -q -ff -ntp verify
+        fi
+    - name: Print test results
+      if: always()
+      run: |
+        python3 - <<'PY'
+        import glob, xml.etree.ElementTree as ET
+        t = f = e = sk = 0
+        for p in sorted(glob.glob('target/surefire-reports/TEST-*.xml')):
+            r = ET.parse(p).getroot()
+            n, ff, ee, ss = (int(r.get(k, 0)) for k in ('tests', 'failures', 'errors', 'skipped'))
+            t += n; f += ff; e += ee; sk += ss
+            print(f"{r.get('name')}: tests={n} failures={ff} errors={ee} skipped={ss}")
+            for tc in r.iter('testcase'):
+                s = tc.find('skipped')
+                if s is not None:
+                    print(f"SKIPPED: {tc.get('classname')}.{tc.get('name')} -- {s.get('message') or 'no message'}")
+        print(f"TOTAL: Tests run: {t}, Failures: {f}, Errors: {e}, Skipped: {sk}, Passed: {t - f - e - sk}")
+        PY
+    - name: Upload jar
+      if: matrix.java_version == '8'
+      uses: actions/upload-artifact@v4
+      with:
+        name: jackson-databind-jar
+        path: target/jackson-databind-*[0-9].jar
+        if-no-files-found: error
     - name: Extract project Maven version
       id: projectVersion
       run: echo ::set-output name=version::$(./mvnw org.apache.maven.plugins:maven-help-plugin:3.2.0:evaluate -DforceStdout -Dexpression=project.version -q)
     - name: Deploy snapshot
-      if: github.event_name != 'pull_request' && matrix.java_version == '8' && endsWith(steps.projectVersion.outputs.version, '-SNAPSHOT')
+      if: false && github.event_name != 'pull_request' && matrix.java_version == '8' && endsWith(steps.projectVersion.outputs.version, '-SNAPSHOT')
       env:
         CI_DEPLOY_USERNAME: ${{ secrets.CI_DEPLOY_USERNAME }}
         CI_DEPLOY_PASSWORD: ${{ secrets.CI_DEPLOY_PASSWORD }}
@@ -59,7 +79,7 @@ jobs:
       if: github.event_name != 'pull_request' && matrix.java_version == '8'
       run: ./mvnw -B -q -ff -ntp test
     - name: Publish code coverage
-      if: github.event_name != 'pull_request' && matrix.java_version == '8'
+      if: false && github.event_name != 'pull_request' && matrix.java_version == '8'
       uses: codecov/codecov-action@v1
       with:
         token: ${{ secrets.CODECOV_TOKEN }}

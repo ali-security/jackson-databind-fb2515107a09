@@ -1,29 +1,13 @@
 name: "CodeQL"
 
 on:
-  schedule:
-    - cron: '40 21 * * 2'
-  push:
-    branches:
-    - master
-    - "3.0"
-    - "2.13"
-    paths-ignore:
-    - "README.md"
-    - "release-notes/*"
-  pull_request:
-    branches:
-    - master
-    - "3.0"
-    - "2.13"
-    paths-ignore:
-    - "README.md"
-    - "release-notes/*"
+  workflow_dispatch: {}
 
 jobs:
   analyze:
     name: Analyze
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     permissions:
       actions: read
       contents: read
