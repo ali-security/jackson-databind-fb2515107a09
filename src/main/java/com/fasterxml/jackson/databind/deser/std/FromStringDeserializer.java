@@ -340,8 +340,15 @@ _coercedTypeDesc());
             case STD_TIME_ZONE:
                 return TimeZone.getTimeZone(value);
             case STD_INET_ADDRESS:
+                // 05-Jul-2026, tatu: [databind#6058] Prevent DNS lookup: only accept valid IP address literals
+                if (!InetAddressValidator.isInetAddress(value)) {
+                    return ctxt.handleWeirdStringValue(_valueClass, value,
+                            "Not a valid IP address string literal");
+                }
                 return InetAddress.getByName(value);
             case STD_INET_SOCKET_ADDRESS:
+                // 05-May-2026, tatu: [databind#5951] Prevent DNS lookup:
+                //   create unresolved addresses only
                 if (value.startsWith("[")) {
                     // bracketed IPv6 (with port number)
 
@@ -354,16 +361,16 @@ _coercedTypeDesc());
 
                     int j = value.indexOf(':', i);
                     int port = j > -1 ? Integer.parseInt(value.substring(j + 1)) : 0;
-                    return new InetSocketAddress(value.substring(0, i + 1), port);
+                    return InetSocketAddress.createUnresolved(value.substring(0, i + 1), port);
                 }
                 int ix = value.indexOf(':');
                 if (ix >= 0 && value.indexOf(':', ix + 1) < 0) {
                     // host:port
                     int port = Integer.parseInt(value.substring(ix+1));
-                    return new InetSocketAddress(value.substring(0, ix), port);
+                    return InetSocketAddress.createUnresolved(value.substring(0, ix), port);
                 }
                 // host or unbracketed IPv6, without port number
-                return new InetSocketAddress(value, 0);
+                return InetSocketAddress.createUnresolved(value, 0);
             }
             VersionUtil.throwInternal();
             return null;
